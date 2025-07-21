@@ -1,38 +1,52 @@
-// api/proxy.js
-// This is your Vercel Serverless Function that acts as a proxy.
+// netlify/functions/proxy.js
+// This is your Netlify Serverless Function that acts as a proxy.
 // It fetches content from a given URL and returns it, bypassing CORS restrictions.
 
-export default async function handler(request, response) {
-    // Set CORS headers to allow your GitHub Pages site to access this proxy.
-    // This is SUPER important for cross-origin communication!
-    response.setHeader('Access-Control-Allow-Origin', '*'); // Allows all origins (for maximum flexibility)
-    response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS'); // Allow GET and OPTIONS requests
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type'); // Allow Content-Type header
+// Netlify Functions use a standard AWS Lambda-like handler signature:
+// exports.handler = async (event, context) => { ... }
+
+exports.handler = async function(event, context) {
+    // Set CORS headers to allow your frontend (also hosted on Netlify) to access this proxy.
+    const headers = {
+        'Access-Control-Allow-Origin': '*', // Allows all origins (for maximum flexibility)
+        'Access-Control-Allow-Methods': 'GET, OPTIONS', // Allow GET and OPTIONS requests
+        'Access-Control-Allow-Headers': 'Content-Type', // Allow Content-Type header
+    };
 
     // Handle preflight OPTIONS requests. Browsers send these before actual GET requests
     // to check if the cross-origin request is allowed.
-    if (request.method === 'OPTIONS') {
-        response.status(200).end(); // Respond with a 200 OK for preflight
-        return;
+    if (event.httpMethod === 'OPTIONS') {
+        return {
+            statusCode: 200,
+            headers: headers,
+            body: '', // Empty body for OPTIONS requests
+        };
     }
 
-    // Get the target URL from the query parameters (e.g., /api/proxy?url=https://example.com)
-    const targetUrl = request.query.url;
+    // Get the target URL from the query parameters (event.queryStringParameters)
+    const targetUrl = event.queryStringParameters.url;
 
     // Basic validation: Check if a URL was actually provided
     if (!targetUrl) {
-        // If no URL, send a 400 Bad Request error with a helpful message
-        return response.status(400).send('Error: Missing "url" query parameter. Please provide a URL to fetch. Example: /api/proxy?url=https://example.com');
+        return {
+            statusCode: 400,
+            headers: headers,
+            body: 'Error: Missing "url" query parameter. Please provide a URL to fetch. Example: /.netlify/functions/proxy?url=https://example.com',
+        };
     }
 
     // Basic URL format validation (not exhaustive, but catches common mistakes)
     try {
         new URL(targetUrl); // Attempt to create a URL object to validate the format
     } catch (error) {
-        return response.status(400).send('Error: The provided URL is malformed. Please ensure it is a valid web address.');
+        return {
+            statusCode: 400,
+            headers: headers,
+            body: 'Error: The provided URL is malformed. Please ensure it is a valid web address.',
+        };
     }
 
-    console.log(`Proxying request for: ${targetUrl}`); // Log the target URL for debugging on Vercel
+    console.log(`Proxying request for: ${targetUrl}`); // Log the target URL for debugging in Netlify logs
 
     try {
         // Fetch the content from the target URL using Node.js's built-in fetch
@@ -42,18 +56,30 @@ export default async function handler(request, response) {
         if (!fetchResponse.ok) {
             const errorText = await fetchResponse.text();
             console.error(`Error fetching from target ${targetUrl}: ${fetchResponse.status} ${fetchResponse.statusText} - ${errorText}`);
-            return response.status(fetchResponse.status).send(`Failed to fetch content from target URL: ${fetchResponse.statusText}. Details: ${errorText}`);
+            return {
+                statusCode: fetchResponse.status,
+                headers: headers,
+                body: `Failed to fetch content from target URL: ${fetchResponse.statusText}. Details: ${errorText}`,
+            };
         }
 
         // Get the raw text content from the target URL's response
         const content = await fetchResponse.text();
 
-        // Send the fetched content back to the client (your GitHub Pages site)
-        response.status(200).send(content);
+        // Send the fetched content back to the client (your Netlify-hosted frontend)
+        return {
+            statusCode: 200,
+            headers: headers,
+            body: content,
+        };
 
     } catch (error) {
         // Catch any network errors or other issues during the fetch operation
         console.error(`Proxy failed to fetch ${targetUrl}:`, error);
-        response.status(500).send(`Internal server error: Could not fetch content. Details: ${error.message}`);
+        return {
+            statusCode: 500,
+            headers: headers,
+            body: `Internal server error: Could not fetch content. Details: ${error.message}`,
+        };
     }
-}
+};
